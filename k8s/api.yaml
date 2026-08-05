@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: photovault
+  labels:
+    app: photovault
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: photovault
+      component: api
+  template:
+    metadata:
+      labels:
+        app: photovault
+        component: api
+    spec:
+      containers:
+        - name: api
+          image: pirraste/photovault-api:v0
+          env:
+            - name: TZ
+              value: "Europe/Rome"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: PORT
+              value: "3000"
+            - name: DISABLE_REQUEST_LOGGING
+              value: "true"
+            # In produzione UI e API stanno sullo stesso host, servite dallo
+            # stesso ingress: nessuna origine esterna da ammettere.
+            - name: CORS_ORIGINS
+              value: ""
+            - name: MEDIA_ROOT
+              value: "/data/photos"
+            # Il pool libuv di default ha 4 thread e ogni lettura su CIFS ne
+            # occupa uno per millisecondi: con 4 una griglia da 200 thumbnail
+            # si serializza in uno stallo visibile.
+            - name: UV_THREADPOOL_SIZE
+              value: "16"
+            - name: BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: photovault-secrets
+                  key: TOKEN
+            - name: PGHOST
+              value: "postgres.photovault.svc.cluster.local"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: photovault-pgcreds
+                  key: PGDATABASE
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: photovault-pgcreds
+                  key: PGUSER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: photovault-pgcreds
+                  key: PGPASSWORD
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 384Mi
+          # /api/health non tocca ne' il database ne' la share: risponde anche
+          # a NAS spento, ed e' giusto cosi'. La navigazione dei metadati vive
+          # nel database e deve restare in piedi quando il NAS non risponde;
+          # sondare la share qui vorrebbe dire farsi riavviare per niente.
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            # Generoso: un thread pool occupato da letture CIFS lente non e' un
+            # processo morto, e riavviare l'API peggiorerebbe le cose.
+            timeoutSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: smb
+              mountPath: /data/photos
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        # PVC in SOLA LETTURA: e' una garanzia strutturale che nessun bug
+        # dell'API possa danneggiare la libreria. A muovere i file e' solo il
+        # pod scan, l'unico con il mount in scrittura.
+        - name: smb
+          persistentVolumeClaim:
+            claimName: pvc-photos-nas-ro
+            readOnly: true
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000

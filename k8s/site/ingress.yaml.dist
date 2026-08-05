@@ -1,0 +1,47 @@
+# Modello. Copiare in ingress.yaml, sostituire photovault.<dominio> con
+# l'hostname vero (in tre punti: tls.hosts, tls.secretName e rules.host),
+# poi ./encrypt.sh.
+#
+# Sta qui e non fra i manifest sincronizzati da ArgoCD perche' l'hostname e' un
+# dato d'infrastruttura e questo repo e' pubblico. Un Ingress vuole l'host
+# scritto in chiaro: non c'e' modo di prenderlo da un Secret.
+#
+# I Service (ui-svc, api-svc) restano invece in k8s/services.yaml, sotto
+# ArgoCD: non contengono niente di specifico dell'installazione.
+#
+# Nessun record DNS da creare se il dominio e' gia' gestito da un wildcard.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: photovault-ingress
+  namespace: photovault
+  labels:
+    app: photovault
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - photovault.<dominio>
+      secretName: photovault-tls
+  rules:
+    - host: photovault.<dominio>
+      http:
+        paths:
+          # /api prima di /: con pathType Prefix Traefik ordina per lunghezza
+          # del percorso, ma tenerli in quest'ordine rende evidente l'intento.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-svc
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui-svc
+                port:
+                  number: 80

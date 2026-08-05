@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# k8s/site/ NON e' qui dentro di proposito: contiene i manifest cifrati con
+# SOPS (secret, PV della share, ingress) e si applica a mano. ArgoCD legge solo
+# questa kustomization, quindi non vede file che non saprebbe decifrare.
+resources:
+- namespace.yaml
+- postgres.yaml
+- services.yaml
+- api.yaml
+- ui.yaml
+- cronjob-scan.yaml
+- cronjob-dedup.yaml
+- cronjob-label.yaml
+
+images:
+- name: pirraste/photovault-api
+  newTag: v0
+- name: pirraste/photovault-ui
+  newTag: v0
+- name: pirraste/photovault-scan
+  newTag: v0
+- name: pirraste/photovault-dedup
+  newTag: v0
+- name: pirraste/photovault-label
+  newTag: v0

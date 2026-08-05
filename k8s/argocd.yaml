@@ -1,0 +1,20 @@
+# Fuori dalla kustomization di proposito: si applica a mano una volta sola,
+# con kubectl apply -f. Non e' una risorsa dell'app, e' cio' che la sincronizza.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: photovault
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pste/photovault-k8s
+    targetRevision: HEAD
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: photovault
+  syncPolicy:
+    automated:
+      prune: true      # rimuove le risorse eliminate dal repo
+      selfHeal: false  # una modifica fatta a mano sul cluster resta, e si vede

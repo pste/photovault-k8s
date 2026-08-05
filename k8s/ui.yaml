@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  namespace: photovault
+  labels:
+    app: photovault
+    component: ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: photovault
+      component: ui
+  template:
+    metadata:
+      labels:
+        app: photovault
+        component: ui
+    spec:
+      containers:
+        - name: ui
+          image: pirraste/photovault-ui:v0
+          ports:
+            # nginx-unprivileged non gira da root: la porta deve stare sopra
+            # la 1024 e coincidere con quella del nginx.conf dell'immagine.
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault

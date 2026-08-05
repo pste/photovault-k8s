@@ -1,0 +1,86 @@
+# SOSPESO: photovault-label e' la fase 5 e l'immagine non esiste ancora.
+# Il manifest sta qui gia' completo perche' i suoi limiti di memoria fanno
+# parte del bilancio del nodo, e vederli scritti serve prima di aggiungere
+# altro. Per attivarlo: costruire l'immagine, poi suspend: false.
+#
+# Sfalsato alle 03:30, dopo lo scan delle 02:00: il labeling legge le
+# thumbnail "m", quindi ha bisogno che le thumbnail esistano gia'.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: photovault-label
+  namespace: photovault
+  labels:
+    app: photovault
+    component: label
+spec:
+  suspend: true
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: photovault
+            component: label
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: label
+              image: pirraste/photovault-label:v0
+              env:
+                - name: TZ
+                  value: "Europe/Rome"
+                - name: LOG_LEVEL
+                  value: "info"
+                - name: API_URL
+                  value: "http://api-svc.photovault.svc.cluster.local:80"
+                - name: API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: photovault-secrets
+                      key: TOKEN
+                - name: MEDIA_ROOT
+                  value: "/data/photos"
+                # Esplicito: il default di ONNX Runtime e' "tutti i core", e
+                # su un nodo a 8 vCPU condiviso affamerebbe Postgres.
+                - name: OMP_NUM_THREADS
+                  value: "2"
+                - name: ONNX_INTRA_OP_THREADS
+                  value: "2"
+                - name: ENQUEUE_ON_START
+                  value: "label"
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "2"
+                  memory: 1Gi
+              volumeMounts:
+                - name: smb
+                  mountPath: /data/photos
+                  readOnly: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            # Sola lettura: il labeling legge le thumbnail "m" e scrive solo
+            # nel database, attraverso l'API.
+            - name: smb
+              persistentVolumeClaim:
+                claimName: pvc-photos-nas-ro
+                readOnly: true
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000

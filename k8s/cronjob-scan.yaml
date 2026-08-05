@@ -1,0 +1,175 @@
+# Due CronJob, stessa immagine, due compiti diversi.
+#
+# - scan-queue  svuota la coda: i job che accodano la UI (una scansione a
+#               comando) e l'API (trashapply, quando l'utente risolve un
+#               gruppo di duplicati). Senza, cestinare una foto resterebbe
+#               senza effetto visibile fino alla notte successiva.
+# - scan-nightly mette in coda la scansione vera e la pulizia del cestino.
+#
+# Gli orari sono sfalsati apposta: scan-queue non parte mai al minuto 0, cosi'
+# non si sovrappone alla scansione notturna. Su un nodo da 7 GB un OOM a
+# livello di nodo porta giu' il cluster, non un pod.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: photovault-scan-queue
+  namespace: photovault
+  labels:
+    app: photovault
+    component: scan
+spec:
+  suspend: false
+  schedule: "7,22,37,52 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: photovault
+            component: scan
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: scan
+              image: pirraste/photovault-scan:v0
+              env:
+                - name: TZ
+                  value: "Europe/Rome"
+                - name: LOG_LEVEL
+                  value: "info"
+                - name: API_URL
+                  value: "http://api-svc.photovault.svc.cluster.local:80"
+                - name: API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: photovault-secrets
+                      key: TOKEN
+                - name: MEDIA_ROOT
+                  value: "/data/photos"
+                - name: SCAN_WORKERS
+                  value: "3"
+                # Obbligatorio: il GC di Go non conosce i limiti cgroup e
+                # cresce oltre il limite del pod finche' non viene OOMKillato
+                # a meta' lavoro. Va tenuto sotto al limits.memory qui sotto.
+                - name: GOMEMLIMIT
+                  value: "800MiB"
+                # Nessun accodamento: questo pod si limita a smaltire quello
+                # che hanno gia' messo in coda la UI o l'API.
+                - name: ENQUEUE_ON_START
+                  value: ""
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: "2"
+                  memory: 1Gi
+              volumeMounts:
+                - name: smb
+                  mountPath: /data/photos
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            # L'unico mount in SCRITTURA di tutto photovault: thumbnail e
+            # cestino. E' hard mount (vedi k8s/site/storage.yaml): una write
+            # parziale silenziosa su un NAS che sparisce sarebbe peggio di
+            # una syscall che si blocca.
+            - name: smb
+              persistentVolumeClaim:
+                claimName: pvc-photos-nas-rw
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: photovault-scan-nightly
+  namespace: photovault
+  labels:
+    app: photovault
+    component: scan
+spec:
+  suspend: false
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: photovault
+            component: scan
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: scan
+              image: pirraste/photovault-scan:v0
+              env:
+                - name: TZ
+                  value: "Europe/Rome"
+                - name: LOG_LEVEL
+                  value: "info"
+                - name: API_URL
+                  value: "http://api-svc.photovault.svc.cluster.local:80"
+                - name: API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: photovault-secrets
+                      key: TOKEN
+                - name: MEDIA_ROOT
+                  value: "/data/photos"
+                - name: SCAN_WORKERS
+                  value: "3"
+                - name: GOMEMLIMIT
+                  value: "800MiB"
+                # La scansione accoda "thumbs" da sola quando finisce, e la
+                # esegue nello stesso run: qui non va ripetuta.
+                - name: ENQUEUE_ON_START
+                  value: "scan,trashpurge"
+                # Root creata al primo avvio se non ne esiste nessuna.
+                # Il percorso e' relativo a MEDIA_ROOT: vuoto = radice share.
+                - name: ROOT_NAME
+                  value: "Foto"
+                - name: ROOT_REL_PATH
+                  value: ""
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: "2"
+                  memory: 1Gi
+              volumeMounts:
+                - name: smb
+                  mountPath: /data/photos
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            - name: smb
+              persistentVolumeClaim:
+                claimName: pvc-photos-nas-rw
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000

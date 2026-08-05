@@ -1,0 +1,80 @@
+# Settimanale, di domenica: lo sha256 e' il passaggio caro (legge gli
+# originali dalla share), ed e' incrementale — dopo il primo giro tocca solo i
+# media nuovi. Sfalsato rispetto allo scan notturno delle 02:00.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: photovault-dedup
+  namespace: photovault
+  labels:
+    app: photovault
+    component: dedup
+spec:
+  suspend: false
+  schedule: "0 5 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: photovault
+            component: dedup
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: dedup
+              image: pirraste/photovault-dedup:v0
+              env:
+                - name: TZ
+                  value: "Europe/Rome"
+                - name: LOG_LEVEL
+                  value: "info"
+                - name: API_URL
+                  value: "http://api-svc.photovault.svc.cluster.local:80"
+                - name: API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: photovault-secrets
+                      key: TOKEN
+                - name: MEDIA_ROOT
+                  value: "/data/photos"
+                - name: DEDUP_BATCH
+                  value: "200"
+                - name: GOMEMLIMIT
+                  value: "400MiB"
+                - name: ENQUEUE_ON_START
+                  value: "dedup"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 96Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              volumeMounts:
+                - name: smb
+                  mountPath: /data/photos
+                  readOnly: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+          volumes:
+            # Sola lettura: questo servizio calcola hash e basta. A spostare i
+            # file e' solo il pod scan, con il job trashapply.
+            - name: smb
+              persistentVolumeClaim:
+                claimName: pvc-photos-nas-ro
+                readOnly: true
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000

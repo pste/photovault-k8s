@@ -1,0 +1,127 @@
+# Modello. Copiare in storage.yaml, sostituire //SERVERNAS/Photos con la
+# share vera, poi ./encrypt.sh.
+#
+# Sta qui e non fra i manifest sincronizzati da ArgoCD per un motivo solo:
+# l'indirizzo della share e' un dato d'infrastruttura, e questo repo e'
+# pubblico. Il driver SMB vuole il source dentro volumeAttributes e non sa
+# leggerlo da un Secret, quindi l'intero file va cifrato.
+#
+# Due PV sulla STESSA share, con opzioni di mount diverse:
+#
+#   pv-photos-nas-ro   soft mount   api, dedup, label
+#   pv-photos-nas-rw   hard mount   scan
+#
+# CIFS di default monta hard: le syscall si bloccano per sempre invece di
+# tornare EIO. Un riavvio del NAS bloccherebbe il threadpool dell'API e
+# porterebbe giu' anche /api/browse, che tocca solo Postgres. Con soft, un NAS
+# morto diventa un EIO che la UI disegna come icona rotta.
+# Lo scan tiene il mount hard: soft in scrittura rischierebbe write parziali
+# silenziose, che e' molto peggio di una syscall lenta.
+#
+# NOTA: il provisioning dinamico (solo PVC) non funziona sulle share in sola
+# lettura — il driver CSI deve creare una sottodirectory al momento del
+# provision. Servono PV+PVC statici, con storageClassName vuoto e volumeName
+# esplicito.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-photos-nas-ro
+  labels:
+    app: photovault
+spec:
+  capacity:
+    storage: 2Ti   # nominale, SMB non impone quote
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""   # vuoto: scavalca il provisioner, si lega al PVC sotto
+  mountOptions:
+    - ro
+    - soft          # un NAS che non risponde da EIO, non un blocco eterno
+    - timeo=30      # decimi di secondo prima di considerare persa una richiesta
+    - actimeo=60    # cache degli attributi: la libreria cambia una volta al giorno
+    - dir_mode=0555
+    - file_mode=0444
+    - uid=1000
+    - gid=1000
+    - noperm
+    - mfsymlinks
+    - cache=strict
+    - noserverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeHandle: nasphotos-pv-ro   # deve essere unico nel cluster
+    volumeAttributes:
+      source: "//SERVERNAS/Photos"
+    nodeStageSecretRef:
+      # I PV sono cluster-scoped: il riferimento a un secret di un altro
+      # namespace e' lecito. Questo secret esiste gia' nel cluster.
+      name: nascreds-ro
+      namespace: default
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-photos-nas-ro
+  namespace: photovault
+  labels:
+    app: photovault
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 2Ti
+  volumeName: pv-photos-nas-ro
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-photos-nas-rw
+  labels:
+    app: photovault
+spec:
+  capacity:
+    storage: 2Ti
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    # Niente "soft" qui: in scrittura una richiesta persa significa un file
+    # scritto a meta' senza che nessuno se ne accorga.
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+    - noperm
+    - mfsymlinks
+    - cache=strict
+    - noserverino
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeHandle: nasphotos-pv-rw   # deve essere unico nel cluster
+    volumeAttributes:
+      source: "//SERVERNAS/Photos"
+    nodeStageSecretRef:
+      name: nascreds-rw
+      namespace: default
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-photos-nas-rw
+  namespace: photovault
+  labels:
+    app: photovault
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 2Ti
+  volumeName: pv-photos-nas-rw

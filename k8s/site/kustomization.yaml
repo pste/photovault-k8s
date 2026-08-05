@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Applicata a mano, MAI da ArgoCD: questi file contengono dati che nel repo
+# vivono solo cifrati con SOPS (credenziali, indirizzo della share, hostname
+# pubblico). ArgoCD legge k8s/kustomization.yaml, che non li include.
+#
+# I file non esistono in chiaro finche' non si lancia ./decrypt.sh.
+resources:
+  - secrets.yaml
+  - secrets-pg.yaml
+  - storage.yaml
+  - ingress.yaml
