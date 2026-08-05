@@ -15,6 +15,10 @@ spec:
     # Directory dedicata: condividerla con un altro Postgres significherebbe
     # due processi sulla stessa PGDATA, che e' corruzione garantita.
     path: /var/mnt/hdd-data-1/photovault-postgres
+    # Esplicito invece che affidarsi al comportamento di default: su Talos non
+    # c'e' SSH per creare la directory a mano, e senza directory
+    # l'initContainer fallirebbe il chown.
+    type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
