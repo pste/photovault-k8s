@@ -2,17 +2,20 @@
 # non e' applicabile cosi' com'e', ed e' voluto: l'indirizzo della share non
 # entra in un repo pubblico.
 #
-# Due PV sulla STESSA share, con opzioni di mount diverse:
+# Due PV sulla STESSA share: cambia il verso (ro / rw), non il comportamento in
+# caso di guasto -- entrambi sono soft.
 #
-#   pv-photos-nas-ro   soft mount   api, dedup, label
-#   pv-photos-nas-rw   hard mount   scan
+#   pv-photos-nas-ro   api, dedup, label
+#   pv-photos-nas-rw   scan (l'unico che scrive)
 #
-# CIFS di default monta hard: le syscall si bloccano per sempre invece di
-# tornare EIO. Un riavvio del NAS bloccherebbe il threadpool dell'API e
-# porterebbe giu' anche /api/browse, che tocca solo Postgres. Con soft, un NAS
-# morto diventa un EIO che la UI disegna come icona rotta.
-# Lo scan tiene il mount hard: soft in scrittura rischierebbe write parziali
-# silenziose, che e' molto peggio di una syscall lenta.
+# soft esplicito su entrambi: un NAS che non risponde deve dare EIO, non
+# bloccare la syscall per sempre. Un blocco sull'API porterebbe giu' anche
+# /api/browse, che tocca solo Postgres; un blocco sullo scan lascerebbe il pod
+# appeso e, con concurrencyPolicy: Forbid, nessuna scansione partirebbe piu'.
+#
+# ATTENZIONE: "timeo" NON e' un'opzione cifs, e' NFS. Metterla fa fallire il
+# mount con "mount error(22): Invalid argument", e l'errore non dice quale
+# opzione sia sbagliata. Verificato sul cluster.
 #
 # NOTA: il provisioning dinamico (solo PVC) non funziona sulle share in sola
 # lettura — il driver CSI deve creare una sottodirectory al momento del
@@ -34,7 +37,6 @@ spec:
   mountOptions:
     - ro
     - soft          # un NAS che non risponde da EIO, non un blocco eterno
-    - timeo=30      # decimi di secondo prima di considerare persa una richiesta
     - actimeo=60    # cache degli attributi: la libreria cambia una volta al giorno
     - dir_mode=0555
     - file_mode=0444
@@ -86,8 +88,13 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   mountOptions:
-    # Niente "soft" qui: in scrittura una richiesta persa significa un file
-    # scritto a meta' senza che nessuno se ne accorga.
+    # soft anche in scrittura, esplicito per non dipendere dal default.
+    # Un hard mount qui bloccherebbe il pod scan per sempre se il NAS sparisce,
+    # e con concurrencyPolicy: Forbid non partirebbe piu' nessuna scansione, in
+    # silenzio. Con soft il job va in errore e si vede nella pagina Job.
+    # Le write parziali non sono un rischio: le thumbnail si scrivono su file
+    # temporaneo e poi rename, e il cestino e' solo una rename.
+    - soft
     - dir_mode=0755
     - file_mode=0644
     - uid=1000

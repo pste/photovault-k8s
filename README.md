@@ -144,18 +144,23 @@ ed è già creato: i PV sono cluster-scoped, quindi il riferimento cross-namespa
 
 **Due PV sulla stessa share**, non uno:
 
-| PV | Access | mountOptions | Montato da |
+| PV | Access | mountOptions in più | Montato da |
 |---|---|---|---|
-| `pv-photos-nas-ro` | ReadOnlyMany | standard + `ro`, `soft`, `timeo=30`, `actimeo=60` | api, dedup, label |
-| `pv-photos-nas-rw` | ReadWriteMany | standard (hard mount) | scan |
+| `pv-photos-nas-ro` | ReadOnlyMany | `ro`, `soft`, `actimeo=60` | api, dedup, label |
+| `pv-photos-nas-rw` | ReadWriteMany | `soft` | scan |
 
-Il motivo è che CIFS di default monta **hard**: le syscall si bloccano all'infinito invece di
-restituire EIO. Un riavvio del NAS bloccherebbe il threadpool dell'API e porterebbe giù anche
-`/api/browse`, che tocca soltanto Postgres. Con `soft` sul percorso di lettura, un NAS
-irraggiungibile diventa un EIO che la UI mostra come icona rotta.
+`soft` è esplicito su entrambi, per non dipendere dal default. Un NAS che non risponde deve
+dare EIO, non bloccare la syscall all'infinito: un blocco sull'API porterebbe giù anche
+`/api/browse`, che tocca soltanto Postgres, e un blocco sullo scan lascerebbe il pod appeso —
+con `concurrencyPolicy: Forbid` non partirebbe più nessuna scansione, senza che niente lo
+segnali. Con `soft` il job va in errore e si vede nella pagina Job della UI.
 
-Sul percorso di **scrittura** `soft` rischierebbe write parziali silenziose, quindi lo scan
-tiene il mount hard.
+Le write parziali non sono un rischio: le thumbnail si scrivono su file temporaneo e poi
+rename, e il cestino è solo una rename.
+
+> **`timeo` non è un'opzione cifs, è NFS.** Metterla fa fallire il mount con
+> `mount error(22): Invalid argument`, senza dire quale opzione sia sbagliata. Costa parecchio
+> tempo perso a sospettare delle credenziali, che invece funzionano.
 
 Opzioni comuni: `dir_mode`, `file_mode`, `uid=1000`, `gid=1000` (gli stessi del `runAsUser` dei
 pod), `noperm`, `mfsymlinks`, `cache=strict`, **`noserverino`**.
