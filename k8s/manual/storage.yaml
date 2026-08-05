@@ -1,5 +1,6 @@
-# ATTENZIONE: //SERVERNAS/Photos e' un segnaposto. Va sostituito con la share
-# vera (in due punti) prima di applicare, altrimenti i PV non montano niente.
+# ${NAS_SHARE} viene sostituito da ./apply-manual.sh leggendo .env. Questo file
+# non e' applicabile cosi' com'e', ed e' voluto: l'indirizzo della share non
+# entra in un repo pubblico.
 #
 # Due PV sulla STESSA share, con opzioni di mount diverse:
 #
@@ -48,7 +49,7 @@ spec:
     readOnly: true
     volumeHandle: nasphotos-pv-ro   # deve essere unico nel cluster
     volumeAttributes:
-      source: "//SERVERNAS/Photos"
+      source: "${NAS_SHARE}"
     nodeStageSecretRef:
       # I PV sono cluster-scoped: il riferimento a un secret di un altro
       # namespace e' lecito. Questo secret esiste gia' nel cluster.
@@ -100,7 +101,7 @@ spec:
     readOnly: false
     volumeHandle: nasphotos-pv-rw   # deve essere unico nel cluster
     volumeAttributes:
-      source: "//SERVERNAS/Photos"
+      source: "${NAS_SHARE}"
     nodeStageSecretRef:
       name: nascreds-rw
       namespace: default

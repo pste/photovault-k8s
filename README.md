@@ -11,44 +11,49 @@ k8s/
 ├── kustomization.yaml    # resources + blocco images: (i tag reali li scrive la CI)
 ├── argocd.yaml           # Application — FUORI dalla kustomization, applicata a mano una volta
 ├── namespace.yaml
-├── storage.yaml          # due PV+PVC SMB (ro e rw) sulla share delle foto
 ├── postgres.yaml         # PV hostPath + PVC + Deployment
 ├── services.yaml         # postgres, ui-svc, api-svc
-├── ingress.yaml          # Ingress con l'hostname pubblico
 ├── api.yaml
 ├── ui.yaml
 ├── cronjob-scan.yaml     # due CronJob: coda ogni 15', scansione notturna
 ├── cronjob-dedup.yaml
 ├── cronjob-label.yaml    # sospeso: photovault-label è la fase 5
-└── secrets/              # SOPS+age, applicati a mano, esclusi dal path di ArgoCD
+├── manual/               # segnaposto ${...}, applicati con ./apply-manual.sh
+│   ├── storage.yaml      # due PV+PVC SMB (ro e rw) — ${NAS_SHARE}
+│   └── ingress.yaml      # Ingress — ${PHOTOVAULT_HOST}
+└── secrets/              # SOPS+age, applicati con ./decrypt.sh + kubectl
     ├── kustomization.yaml
     ├── secrets.yaml      # TOKEN
     └── secrets-pg.yaml   # PGDATABASE / PGUSER / PGPASSWORD
 ```
 
-### Cosa sta fuori da ArgoCD, e perché solo quello
+### Cosa sta fuori da ArgoCD, e perché
 
-Solo `secrets/`. Il criterio è uno e verificabile: **ArgoCD non sa decifrare SOPS**, quindi
-tutto ciò che è cifrato deve essere applicato a mano. Tutto il resto è GitOps, compresi PV e
-Ingress. Stessa forma di `reimagined-disco-k8s`.
+Due cartelle, per due motivi diversi, entrambi verificabili:
 
-I file veri dei secret non stanno nel repo: ci sono i modelli `*.yaml.dist` da copiare,
-valorizzare e cifrare.
+| Cartella | Perché ArgoCD non può | Come si applica |
+|---|---|---|
+| `secrets/` | non sa decifrare SOPS | `./decrypt.sh && kubectl apply -k k8s/secrets && ./encrypt.sh` |
+| `manual/` | non esegue `envsubst` | `./apply-manual.sh` |
 
-### Il prezzo da sapere
+Tutto il resto è GitOps.
 
-`storage.yaml` e `ingress.yaml` devono contenere i **valori veri** — l'indirizzo della share e
-l'hostname pubblico — perché ArgoCD legge il repo e nient'altro. Il driver SMB vuole il
-`source` dentro `volumeAttributes` e un Ingress vuole l'host in chiaro: nessuno dei due può
-arrivare da un `secretKeyRef`.
+### Perché `manual/` esiste
 
-Quei due dati sono quindi **in chiaro in un repo pubblico**. Se non va bene, l'unico rimedio
-pulito è rendere privato questo repo e configurare le credenziali del repository su ArgoCD
-(oggi non ne ha nessuna: legge `reimagined-disco-k8s` in anonimo perché è pubblico).
+Il driver SMB vuole il `source` dentro `volumeAttributes` e un Ingress vuole l'host scritto in
+chiaro: **nessuno dei due può arrivare da un `secretKeyRef`**. Se quei due manifest stessero
+sotto ArgoCD, l'indirizzo della share e l'hostname pubblico finirebbero in chiaro in un repo
+pubblico.
 
-I due file sono committati con dei segnaposto — `//SERVERNAS/Photos` e `photovault.<dominio>` —
-e **così non si applicano**: `kubectl` rifiuta l'Ingress, perché `<dominio>` non è un nome DNS
-valido. È voluto: meglio un errore in faccia che un deploy silenziosamente sbagliato.
+Quindi nel repo restano parametrici, e i valori veri vivono in `.env` (gitignorato), sostituiti
+da `apply-manual.sh` al momento dell'apply. Rispetto a cifrarli con SOPS si guadagna che nel
+repo restano manifest **leggibili e diffabili**, invece di blocchi `ENC[…]`.
+
+Costa un apply a mano in più. È un costo che si paga quasi mai: un PV è immutabile una volta
+creato e l'hostname non cambia.
+
+Il `pre-commit` rifiuta un file di `manual/` che non contenga più segnaposto — cioè che sia
+stato committato dopo la sostituzione.
 
 ## Prima installazione, in ordine
 
@@ -59,53 +64,72 @@ valido. È voluto: meglio un errore in faccia che un deploy silenziosamente sbag
 chmod 600 private/age-key.txt
 git config core.hooksPath .githooks
 
-# 2. i segnaposto nei manifest versionati, sostituiti coi valori veri
-#    k8s/storage.yaml  → la share, in due punti
-#    k8s/ingress.yaml  → l'hostname, in due punti
-git commit -am "chore: valori di questa installazione"
+# 2. i valori di questa installazione, che nel repo non entrano
+cp .env.dist .env
+# ... valorizzare NAS_SHARE e PHOTOVAULT_HOST ...
 
 # 3. i secret, dai modelli
 cd k8s/secrets
 for f in secrets secrets-pg; do cp $f.yaml.dist $f.yaml; done
-# ... valorizzarli ...
+# ... valorizzarli (TOKEN: openssl rand -hex 32) ...
 cd ../..
 ./encrypt.sh
 
-# 4. applicare: prima i secret, che i pod montano come variabili
-./decrypt.sh && kubectl apply -k k8s/secrets && ./encrypt.sh
+# 4. il namespace, che deve esistere prima di tutto il resto
+kubectl apply -f k8s/namespace.yaml
 
-# 5. l'applicazione
+# 5. i secret e i manifest parametrici
+./decrypt.sh && kubectl apply -k k8s/secrets && ./encrypt.sh
+./apply-manual.sh
+
+# 6. l'applicazione
 kubectl apply -k k8s
 
-# 6. lo schema del database (vedi "Migrations")
+# 7. lo schema del database (vedi "Migrations")
 kubectl -n photovault port-forward deployment/postgres 5432:5432
 cd ../photovault-db && node app.js -e local up
 
-# 7. ArgoCD, una volta sola
+# 8. ArgoCD, una volta sola
 kubectl apply -f k8s/argocd.yaml
 ```
 
-Il passo 4 va prima del 5: senza il secret `photovault-pgcreds`, Postgres e l'API non partono.
-Il passo 2 non è opzionale: coi segnaposto, `kubectl apply -k k8s` fallisce sull'Ingress.
+L'ordine conta in due punti. Il namespace prima di tutto: `apply-manual.sh` si rifiuta di
+partire senza, perché creerebbe i due PV (cluster-scoped) e poi fallirebbe su PVC e Ingress,
+lasciando il lavoro a metà. E il passo 5 prima del 6: senza `photovault-pgcreds` Postgres non
+parte, senza i PVC l'API e i cron restano `Pending`.
+
+`apply-manual.sh` fa da solo un giro di `--dry-run=server` prima dell'apply vero: meglio
+scoprire un valore sbagliato subito che con metà risorse già create.
 
 `argocd.yaml` sta fuori dalla kustomization per evitare un riferimento circolare: monitora e
 aggiorna proprio quella cartella, e includerlo creerebbe un ciclo.
 
-Il `TOKEN` del passo 3 va generato lungo e casuale:
+## Cosa non entra nel repo
+
+Tre meccanismi, e un `pre-commit` che li fa rispettare.
+
+| Dato | Dove vive | Come arriva sul cluster |
+|---|---|---|
+| share, hostname | `.env` (gitignorato) | `envsubst` in `apply-manual.sh` |
+| TOKEN, credenziali PG | `k8s/secrets/*.yaml` cifrati | SOPS + age |
+| chiave privata age | `private/` (gitignorata) | non ci arriva: serve solo a decifrare |
+
+L'hook `pre-commit` fa **tre** controlli, perché nessuno dei tre copre gli altri:
+
+1. rifiuta il commit finché esiste il lock file `decrypted`, cioè fra un `decrypt.sh` e il suo
+   `encrypt.sh`;
+2. rifiuta un file di `k8s/secrets/` che non contenga `ENC[AES256_GCM` — è il caso di un file
+   appena copiato da un `.dist` e mai passato per `decrypt.sh`, che il lock non intercetta;
+3. rifiuta un file di `k8s/manual/` che non contenga più segnaposto `${…}`, cioè committato
+   dopo la sostituzione.
+
+Il filtro è `--diff-filter=ACMR`: senza la `R` un file **rinominato** sfugge a tutti e tre.
+
+Per attivarlo, una volta per clone:
 
 ```bash
-openssl rand -hex 32
+git config core.hooksPath .githooks
 ```
-
-## Secrets
-
-SOPS + age. La chiave privata sta in `private/` (gitignorata), quella pubblica in
-`public-age-keys.txt`.
-
-L'hook `pre-commit` fa due controlli, perché il primo da solo non basta: rifiuta il commit
-finché esiste il lock file `decrypted` (cioè fra un `decrypt.sh` e il suo `encrypt.sh`), **e**
-rifiuta qualunque file di `k8s/secrets/` che non contenga `ENC[AES256_GCM` — che è il caso di un
-file appena copiato da un `.dist` e mai passato per `decrypt.sh`.
 
 ## Storage
 

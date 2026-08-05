@@ -11,13 +11,24 @@ fi
 # 2. Il contenuto: il lock non copre il caso di un file creato a mano da un
 #    .dist e mai passato per decrypt.sh. Qui dentro finiscono il bearer token
 #    e la password del database, e i repo sono pubblici.
-for FNAME in $(git diff --cached --name-only --diff-filter=ACM | grep '^k8s/secrets/.*\.yaml$'); do
+for FNAME in $(git diff --cached --name-only --diff-filter=ACMR | grep '^k8s/secrets/.*\.yaml$'); do
   case "$FNAME" in
     *kustomization.yaml) continue ;;
   esac
   if ! git show ":$FNAME" | grep -q 'ENC\[AES256_GCM'; then
     echo "$FNAME non e' cifrato con SOPS: commit annullata."
     echo "Lancia ./encrypt.sh."
+    exit 1
+  fi
+done
+
+# 3. I manifest di k8s/manual/ devono restare parametrici. Se ci finisce dentro
+#    il valore sostituito, l'indirizzo della share o l'hostname entrano nel
+#    repo, che e' pubblico -- ed e' esattamente cio' che envsubst evita.
+for FNAME in $(git diff --cached --name-only --diff-filter=ACMR | grep '^k8s/manual/.*\.yaml$'); do
+  if ! git show ":$FNAME" | grep -q '\${'; then
+    echo "$FNAME non contiene piu' segnaposto: commit annullata."
+    echo "I valori veri vanno in .env, non nel manifest."
     exit 1
   fi
 done
