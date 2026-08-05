@@ -18,7 +18,7 @@ images:
 - name: pirraste/photovault-api
   newTag: v0.1.1
 - name: pirraste/photovault-dedup
-  newTag: v0
+  newTag: v0.1.0
 - name: pirraste/photovault-label
   newTag: v0
 - name: pirraste/photovault-scan
