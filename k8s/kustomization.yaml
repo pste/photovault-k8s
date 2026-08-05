@@ -22,6 +22,6 @@ images:
 - name: pirraste/photovault-label
   newTag: v0
 - name: pirraste/photovault-scan
-  newTag: v0
+  newTag: v0.1.0
 - name: pirraste/photovault-ui
   newTag: v0
