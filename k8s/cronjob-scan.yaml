@@ -81,7 +81,7 @@ spec:
                   type: RuntimeDefault
           volumes:
             # L'unico mount in SCRITTURA di tutto photovault: thumbnail e
-            # cestino. E' hard mount (vedi k8s/site/storage.yaml): una write
+            # cestino. E' hard mount (vedi k8s/storage.yaml): una write
             # parziale silenziosa su un NAS che sparisce sarebbe peggio di
             # una syscall che si blocca.
             - name: smb

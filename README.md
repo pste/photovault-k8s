@@ -11,74 +11,87 @@ k8s/
 ├── kustomization.yaml    # resources + blocco images: (i tag reali li scrive la CI)
 ├── argocd.yaml           # Application — FUORI dalla kustomization, applicata a mano una volta
 ├── namespace.yaml
+├── storage.yaml          # due PV+PVC SMB (ro e rw) sulla share delle foto
 ├── postgres.yaml         # PV hostPath + PVC + Deployment
 ├── services.yaml         # postgres, ui-svc, api-svc
+├── ingress.yaml          # Ingress con l'hostname pubblico
 ├── api.yaml
 ├── ui.yaml
 ├── cronjob-scan.yaml     # due CronJob: coda ogni 15', scansione notturna
 ├── cronjob-dedup.yaml
 ├── cronjob-label.yaml    # sospeso: photovault-label è la fase 5
-└── site/                 # SOPS+age, applicati a mano, esclusi dal path di ArgoCD
+└── secrets/              # SOPS+age, applicati a mano, esclusi dal path di ArgoCD
     ├── kustomization.yaml
     ├── secrets.yaml      # TOKEN
-    ├── secrets-pg.yaml   # PGDATABASE / PGUSER / PGPASSWORD
-    ├── storage.yaml      # due PV+PVC SMB (ro e rw) sulla share delle foto
-    └── ingress.yaml      # Ingress con l'hostname pubblico
+    └── secrets-pg.yaml   # PGDATABASE / PGUSER / PGPASSWORD
 ```
 
-### Perché `site/` e non `secrets/`
+### Cosa sta fuori da ArgoCD, e perché solo quello
 
-I repo sono pubblici. In `site/` non stanno solo i Secret: stanno **tutti i manifest che
-contengono dati d'infrastruttura**, cioè anche l'indirizzo della share (`storage.yaml`) e
-l'hostname (`ingress.yaml`). Né l'uno né l'altro può arrivare da un `secretKeyRef` — il driver
-SMB vuole il `source` dentro `volumeAttributes` e un Ingress vuole l'host in chiaro — quindi
-l'unico modo di tenerli fuori dal repo in chiaro è cifrare il file intero con SOPS.
+Solo `secrets/`. Il criterio è uno e verificabile: **ArgoCD non sa decifrare SOPS**, quindi
+tutto ciò che è cifrato deve essere applicato a mano. Tutto il resto è GitOps, compresi PV e
+Ingress. Stessa forma di `reimagined-disco-k8s`.
 
-È l'unica deviazione dalla forma di `reimagined-disco-k8s`, che ha una cartella `secrets/` con
-i soli Secret. Il prezzo è che PV, PVC e Ingress si applicano a mano invece che via ArgoCD: si
-paga una volta sola, perché non cambiano quasi mai.
+I file veri dei secret non stanno nel repo: ci sono i modelli `*.yaml.dist` da copiare,
+valorizzare e cifrare.
 
-I Service restano invece sotto ArgoCD, in `services.yaml`: non contengono niente di specifico
-di questa installazione.
+### Il prezzo da sapere
 
-I file veri non esistono nel repo: ci sono i modelli `*.yaml.dist` da copiare, valorizzare e
-cifrare.
+`storage.yaml` e `ingress.yaml` devono contenere i **valori veri** — l'indirizzo della share e
+l'hostname pubblico — perché ArgoCD legge il repo e nient'altro. Il driver SMB vuole il
+`source` dentro `volumeAttributes` e un Ingress vuole l'host in chiaro: nessuno dei due può
+arrivare da un `secretKeyRef`.
+
+Quei due dati sono quindi **in chiaro in un repo pubblico**. Se non va bene, l'unico rimedio
+pulito è rendere privato questo repo e configurare le credenziali del repository su ArgoCD
+(oggi non ne ha nessuna: legge `reimagined-disco-k8s` in anonimo perché è pubblico).
+
+I due file sono committati con dei segnaposto — `//SERVERNAS/Photos` e `photovault.<dominio>` —
+e **così non si applicano**: `kubectl` rifiuta l'Ingress, perché `<dominio>` non è un nome DNS
+valido. È voluto: meglio un errore in faccia che un deploy silenziosamente sbagliato.
 
 ## Prima installazione, in ordine
 
 ```bash
-# 1. chiavi SOPS e hook di protezione
-age-keygen -o private/age-key.txt
-echo '<chiave pubblica>' > public-age-keys.txt
+# 1. chiave SOPS e hook di protezione
+#    la chiave di questo progetto e' gia' generata: serve solo metterla qui
+#    (privata in private/age-key.txt, pubblica in public-age-keys.txt)
+chmod 600 private/age-key.txt
 git config core.hooksPath .githooks
 
-# 2. i manifest specifici dell'installazione, dai modelli
-cd k8s/site
-for f in secrets secrets-pg storage ingress; do cp $f.yaml.dist $f.yaml; done
-# ... valorizzare i quattro file ...
+# 2. i segnaposto nei manifest versionati, sostituiti coi valori veri
+#    k8s/storage.yaml  → la share, in due punti
+#    k8s/ingress.yaml  → l'hostname, in due punti
+git commit -am "chore: valori di questa installazione"
+
+# 3. i secret, dai modelli
+cd k8s/secrets
+for f in secrets secrets-pg; do cp $f.yaml.dist $f.yaml; done
+# ... valorizzarli ...
 cd ../..
 ./encrypt.sh
 
-# 3. applicarli (i PVC devono esistere prima dei pod che li montano)
-./decrypt.sh && kubectl apply -k k8s/site && ./encrypt.sh
+# 4. applicare: prima i secret, che i pod montano come variabili
+./decrypt.sh && kubectl apply -k k8s/secrets && ./encrypt.sh
 
-# 4. l'applicazione
+# 5. l'applicazione
 kubectl apply -k k8s
 
-# 5. lo schema del database (vedi "Migrations")
+# 6. lo schema del database (vedi "Migrations")
 kubectl -n photovault port-forward deployment/postgres 5432:5432
 cd ../photovault-db && node app.js -e local up
 
-# 6. ArgoCD, una volta sola
+# 7. ArgoCD, una volta sola
 kubectl apply -f k8s/argocd.yaml
 ```
 
-Il passo 3 va prima del 4: senza i PVC i pod dell'API e dei cron restano in `Pending`.
+Il passo 4 va prima del 5: senza il secret `photovault-pgcreds`, Postgres e l'API non partono.
+Il passo 2 non è opzionale: coi segnaposto, `kubectl apply -k k8s` fallisce sull'Ingress.
 
 `argocd.yaml` sta fuori dalla kustomization per evitare un riferimento circolare: monitora e
 aggiorna proprio quella cartella, e includerlo creerebbe un ciclo.
 
-Il token del passo 2 va generato lungo e casuale:
+Il `TOKEN` del passo 3 va generato lungo e casuale:
 
 ```bash
 openssl rand -hex 32
@@ -91,7 +104,7 @@ SOPS + age. La chiave privata sta in `private/` (gitignorata), quella pubblica i
 
 L'hook `pre-commit` fa due controlli, perché il primo da solo non basta: rifiuta il commit
 finché esiste il lock file `decrypted` (cioè fra un `decrypt.sh` e il suo `encrypt.sh`), **e**
-rifiuta qualunque file di `k8s/site/` che non contenga `ENC[AES256_GCM` — che è il caso di un
+rifiuta qualunque file di `k8s/secrets/` che non contenga `ENC[AES256_GCM` — che è il caso di un
 file appena copiato da un `.dist` e mai passato per `decrypt.sh`.
 
 ## Storage

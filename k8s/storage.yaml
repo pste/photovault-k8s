@@ -1,10 +1,5 @@
-# Modello. Copiare in storage.yaml, sostituire //SERVERNAS/Photos con la
-# share vera, poi ./encrypt.sh.
-#
-# Sta qui e non fra i manifest sincronizzati da ArgoCD per un motivo solo:
-# l'indirizzo della share e' un dato d'infrastruttura, e questo repo e'
-# pubblico. Il driver SMB vuole il source dentro volumeAttributes e non sa
-# leggerlo da un Secret, quindi l'intero file va cifrato.
+# ATTENZIONE: //SERVERNAS/Photos e' un segnaposto. Va sostituito con la share
+# vera (in due punti) prima di applicare, altrimenti i PV non montano niente.
 #
 # Due PV sulla STESSA share, con opzioni di mount diverse:
 #

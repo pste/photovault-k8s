@@ -1,13 +1,7 @@
-# Modello. Copiare in ingress.yaml, sostituire photovault.<dominio> con
-# l'hostname vero (in tre punti: tls.hosts, tls.secretName e rules.host),
-# poi ./encrypt.sh.
+# ATTENZIONE: photovault.<dominio> e' un segnaposto. Va sostituito con
+# l'hostname vero in due punti (tls.hosts e rules.host) prima di applicare.
 #
-# Sta qui e non fra i manifest sincronizzati da ArgoCD perche' l'hostname e' un
-# dato d'infrastruttura e questo repo e' pubblico. Un Ingress vuole l'host
-# scritto in chiaro: non c'e' modo di prenderlo da un Secret.
-#
-# I Service (ui-svc, api-svc) restano invece in k8s/services.yaml, sotto
-# ArgoCD: non contengono niente di specifico dell'installazione.
+# I Service (ui-svc, api-svc) stanno in k8s/services.yaml.
 #
 # Nessun record DNS da creare se il dominio e' gia' gestito da un wildcard.
 apiVersion: networking.k8s.io/v1

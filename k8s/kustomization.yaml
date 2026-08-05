@@ -1,13 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# k8s/site/ NON e' qui dentro di proposito: contiene i manifest cifrati con
-# SOPS (secret, PV della share, ingress) e si applica a mano. ArgoCD legge solo
-# questa kustomization, quindi non vede file che non saprebbe decifrare.
+# k8s/secrets/ NON e' qui dentro di proposito: e' cifrato con SOPS e ArgoCD non
+# sa decifrarlo. Si applica a mano, ed e' l'unica cosa che si applica a mano.
 resources:
 - namespace.yaml
+- storage.yaml
 - postgres.yaml
 - services.yaml
+- ingress.yaml
 - api.yaml
 - ui.yaml
 - cronjob-scan.yaml
