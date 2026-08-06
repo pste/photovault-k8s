@@ -1,10 +1,13 @@
-# SOSPESO: photovault-label e' la fase 5 e l'immagine non esiste ancora.
-# Il manifest sta qui gia' completo perche' i suoi limiti di memoria fanno
-# parte del bilancio del nodo, e vederli scritti serve prima di aggiungere
-# altro. Per attivarlo: costruire l'immagine, poi suspend: false.
+# Etichettatura. Oggi esegue un job solo, "places": i toponimi dal GPS EXIF e
+# dal nome delle cartelle, che non hanno bisogno di thumbnail ne' di modelli --
+# solo del file GeoNames che sta dentro l'immagine.
 #
-# Sfalsato alle 03:30, dopo lo scan delle 02:00: il labeling legge le
-# thumbnail "m", quindi ha bisogno che le thumbnail esistano gia'.
+# I tag di scena con CLIP arriveranno come secondo job, con la loro coda
+# (label_status) e le variabili di ONNX Runtime, che si aggiungono qui quando
+# servono davvero: una configurazione che non fa niente e' peggio di una
+# mancante, perche' sembra attiva.
+#
+# Sfalsato alle 03:30, dopo lo scan delle 02:00.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -14,7 +17,6 @@ metadata:
     app: photovault
     component: label
 spec:
-  suspend: true
   schedule: "30 3 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -44,16 +46,12 @@ spec:
                     secretKeyRef:
                       name: photovault-secrets
                       key: TOKEN
-                - name: MEDIA_ROOT
-                  value: "/data/photos"
-                # Esplicito: il default di ONNX Runtime e' "tutti i core", e
-                # su un nodo a 8 vCPU condiviso affamerebbe Postgres.
-                - name: OMP_NUM_THREADS
-                  value: "2"
-                - name: ONNX_INTRA_OP_THREADS
-                  value: "2"
+                # Nessun MEDIA_ROOT: i luoghi non leggono un solo file dalla
+                # share. Tornera' con CLIP, che lavora sulle thumbnail "m".
+                - name: LABEL_BATCH
+                  value: "500"
                 - name: ENQUEUE_ON_START
-                  value: "label"
+                  value: "places"
               resources:
                 requests:
                   cpu: 250m
@@ -61,10 +59,6 @@ spec:
                 limits:
                   cpu: "2"
                   memory: 1Gi
-              volumeMounts:
-                - name: smb
-                  mountPath: /data/photos
-                  readOnly: true
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true
@@ -73,13 +67,8 @@ spec:
                     - ALL
                 seccompProfile:
                   type: RuntimeDefault
-          volumes:
-            # Sola lettura: il labeling legge le thumbnail "m" e scrive solo
-            # nel database, attraverso l'API.
-            - name: smb
-              persistentVolumeClaim:
-                claimName: pvc-photos-nas-ro
-                readOnly: true
+          # Nessun volume: il job dei luoghi non tocca la share. Il mount in
+          # sola lettura torna con CLIP, che legge le thumbnail "m".
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
