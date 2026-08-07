@@ -19,7 +19,7 @@ resources:
 
 images:
 - name: pirraste/photovault-api
-  newTag: v0.1.7
+  newTag: v0.1.8
 - name: pirraste/photovault-dedup
   newTag: v0.1.1
 - name: pirraste/photovault-label
