@@ -208,7 +208,7 @@ Non è una duplicazione: sono due compiti diversi con la stessa immagine.
 
 | CronJob | Schedule | `ENQUEUE_ON_START` | A cosa serve |
 |---|---|---|---|
-| `photovault-scan-queue` | `7,22,37,52 * * * *` | *(vuoto)* | svuota la coda: `trashapply` accodato dall'API quando l'utente risolve un gruppo di duplicati, e le scansioni chieste dalla UI |
+| `photovault-scan-queue` | `7,22,37,52 * * * *` | *(vuoto)* | svuota la coda dei soli job leggeri (`JOBS=trashapply,livephoto`): il cestino accodato dall'API quando l'utente cestina qualcosa |
 | `photovault-scan-nightly` | `0 2 * * *` | `scan,trashpurge` | la scansione vera e la pulizia del cestino scaduto |
 
 Senza il primo, cestinare una foto dalla UI resterebbe senza effetto visibile fino alla notte
@@ -216,8 +216,11 @@ successiva. Senza il secondo, nessuno accoderebbe mai una scansione: **su Kubern
 schedulazione la fa il CronJob**, e il pod si limita a mettere in coda il lavoro quando viene
 svegliato. L'accodamento è idempotente (l'API tiene un solo job `pending` per nome).
 
-Gli orari del primo sono sfalsati apposta dal minuto 0, così non si sovrappone alla scansione
-notturna.
+I due **si sovrappongono**: `thumbs`, con un arretrato, gira per giorni, e
+`concurrencyPolicy: Forbid` impedisce solo a un CronJob di sovrapporsi a se stesso. Per questo
+il primo ha `JOBS`: accetta solo job che non decodificano immagini, e quindi gli bastano
+256Mi. Senza, se trovava `thumbs` in coda si metteva a generare anteprime accanto al notturno.
+Conseguenza voluta: una scansione chiesta dalla UI parte col notturno.
 
 `photovault-label` è presente ma **sospeso**: l'immagine non esiste ancora (fase 5). Il
 manifest sta lì già completo perché i suoi limiti di memoria fanno parte del bilancio del nodo.
@@ -234,12 +237,16 @@ Quindi, a differenza di reimagined-disco, qui le `resources` si mettono davvero:
 | api | cpu 50m, mem 128Mi | cpu 1, mem 384Mi |
 | ui | cpu 10m, mem 32Mi | cpu 200m, mem 128Mi |
 | postgres | cpu 100m, mem 192Mi | cpu 2, mem 768Mi |
-| scan (×2 CronJob) | cpu 100m, mem 128Mi | cpu 2, mem 1Gi |
+| scan-nightly | cpu 100m, mem 128Mi | cpu 2, mem 1Gi |
+| scan-queue | cpu 100m, mem 64Mi | cpu 1, mem 256Mi |
 | dedup | cpu 100m, mem 96Mi | cpu 1, mem 512Mi |
 | label | cpu 250m, mem 512Mi | cpu 2, mem 1Gi |
 
 Le requests dei servizi sempre accesi sommano a 160m di CPU e 352Mi di memoria: il resto è
-capienza per i cron, che girano uno alla volta.
+capienza per i cron. **I cron non girano uno alla volta**: lo sfalsamento degli orari non
+basta, perché `thumbs` può durare giorni. Nel caso peggiore — notturno, label, dedup e
+scan-queue insieme — i limiti sommano a circa 4 GB contro i 3 disponibili: il margine regge
+perché label e scan-queue usano in pratica molto meno del loro limite.
 
 `GOMEMLIMIT` sui pod Go è **obbligatorio** e va tenuto sotto al `limits.memory`: il GC di Go non
 conosce i limiti cgroup e cresce oltre il limite del pod finché non viene OOMKillato a metà
@@ -248,6 +255,13 @@ lavoro. Un'immagine da 24 MP decodificata in RGBA occupa 96 MB.
 I CronJob sono **sfalsati** (`scan` a 02:00, `label` a 03:30, `dedup` la domenica alle 05:00)
 con `concurrencyPolicy: Forbid`: su un nodo da 7 GB un OOM a livello di nodo porta giù il
 cluster intero, non un solo pod.
+
+Tutti hanno `startingDeadlineSeconds`: senza, un controller rimasto fermo che accumula oltre
+100 orari mancati smette di schedulare quel CronJob per sempre. Hanno anche
+`activeDeadlineSeconds`, perché con `Forbid` un pod appeso bloccherebbe ogni corsa successiva:
+30 minuti per scan-queue, 2 ore per label, 2 giorni per dedup. **Il notturno no**, per scelta:
+`thumbs` con un arretrato gira legittimamente per giorni, e contro i blocchi veri ci sono i
+tempi massimi su ffmpeg, ffprobe e heif-convert dentro il pod.
 
 ## Sicurezza dei pod
 

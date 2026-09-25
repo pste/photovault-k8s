@@ -7,7 +7,9 @@
 # servono davvero: una configurazione che non fa niente e' peggio di una
 # mancante, perche' sembra attiva.
 #
-# Sfalsato alle 03:30, dopo lo scan delle 02:00.
+# Alle 03:30, dopo lo scan delle 02:00. Lo sfalsamento non esclude la
+# sovrapposizione con thumbs, che con un arretrato gira per giorni: i luoghi
+# pero' finiscono in secondi.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -19,11 +21,15 @@ metadata:
 spec:
   schedule: "30 3 * * *"
   concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1
+      # I luoghi dell'archivio intero richiedono minuti: due ore sono un
+      # blocco, e senza limite il Forbid fermerebbe questo CronJob per sempre.
+      activeDeadlineSeconds: 7200
       template:
         metadata:
           labels:
