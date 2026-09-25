@@ -25,9 +25,19 @@ done
 # 3. I manifest di k8s/manual/ devono restare parametrici. Se ci finisce dentro
 #    il valore sostituito, l'indirizzo della share o l'hostname entrano nel
 #    repo, che e' pubblico -- ed e' esattamente cio' che envsubst evita.
+#
+#    Si guardano le righe che portano i valori, non il file intero: i due
+#    manifest nominano i segnaposto anche nei commenti in cima, e un valore vero
+#    scritto in source: o in host: passava lo stesso, perche' un ${ nel file
+#    c'era ancora. Le righe controllate sono source:, host: e gli elementi di
+#    una lista hosts: (un nome con un punto e niente due punti).
 for FNAME in $(git diff --cached --name-only --diff-filter=ACMR | grep '^k8s/manual/.*\.yaml$'); do
-  if ! git show ":$FNAME" | grep -q '\${'; then
-    echo "$FNAME non contiene piu' segnaposto: commit annullata."
+  LEAKS=$(git show ":$FNAME" \
+    | grep -v '^[[:space:]]*#' \
+    | grep -E '^[[:space:]]*(-[[:space:]]*)?(source|host):|^[[:space:]]*-[[:space:]]+[^:[:space:]]+\.[^:[:space:]]+[[:space:]]*$' \
+    | grep -v '\${')
+  if [ -n "$LEAKS" ]; then
+    echo "$FNAME contiene un valore al posto del segnaposto: commit annullata."
     echo "I valori veri vanno in .env, non nel manifest."
     exit 1
   fi
