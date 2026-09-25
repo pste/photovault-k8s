@@ -68,16 +68,18 @@ spec:
         # root e postgres (uid 999) non puo' scriverci. Su Talos non c'e' SSH
         # per fare il chown sul nodo, quindi lo fa un initContainer.
         - name: fix-permissions
-          image: busybox:1.36
+          image: busybox:1.36.1
           command: ['sh', '-c', 'chown -R 999:999 /var/lib/postgresql/data']
           volumeMounts:
             - mountPath: /var/lib/postgresql/data
               name: postgresdata
       containers:
         - name: postgres
-          # Stessa versione usata in sviluppo. bit_count() e' core dalla 14:
-          # e' il presupposto della scelta dhash bit(64) nel dedup.
-          image: 'postgres:14'
+          # Stessa major usata in sviluppo. bit_count() e' core dalla 14: e' il
+          # presupposto della scelta dhash bit(64) nel dedup. Versione completa,
+          # quella gia' in esecuzione: con 'postgres:14' ogni riavvio del pod
+          # poteva scaricare una minor nuova senza che niente lo dicesse.
+          image: 'postgres:14.18'
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

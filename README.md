@@ -179,7 +179,7 @@ kubectl patch pv pv-photos-nas-ro --type=json -p='[{"op":"remove","path":"/spec/
 
 ### Postgres
 
-`postgres:14` (pinnata, stessa versione dello sviluppo), su un PV `hostPath` in
+`postgres:14.18` (pinnata alla versione completa, stessa major dello sviluppo), su un PV `hostPath` in
 `/var/mnt/hdd-data-1/photovault-postgres` con `storageClassName: manual`. SMB non è un posto
 sicuro per i file di un database: il volume locale del nodo sì.
 
