@@ -99,9 +99,10 @@ spec:
                   type: RuntimeDefault
           volumes:
             # L'unico mount in SCRITTURA di tutto photovault: thumbnail e
-            # cestino. E' hard mount (vedi k8s/storage.yaml): una write
-            # parziale silenziosa su un NAS che sparisce sarebbe peggio di
-            # una syscall che si blocca.
+            # cestino. E' soft mount (vedi k8s/manual/storage.yaml): un NAS
+            # che non risponde deve dare EIO, non appendere il pod. Le write
+            # parziali non sono un rischio, perche' le thumbnail si scrivono
+            # su file temporaneo e poi rename, e il cestino e' solo una rename.
             - name: smb
               persistentVolumeClaim:
                 claimName: pvc-photos-nas-rw
