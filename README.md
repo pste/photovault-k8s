@@ -252,7 +252,8 @@ perché label e scan-queue usano in pratica molto meno del loro limite.
 conosce i limiti cgroup e cresce oltre il limite del pod finché non viene OOMKillato a metà
 lavoro. Un'immagine da 24 MP decodificata in RGBA occupa 96 MB.
 
-I CronJob sono **sfalsati** (`scan` a 02:00, `label` a 03:30, `dedup` la domenica alle 05:00)
+I CronJob sono **sfalsati** (`scan` a 02:00, `label` a 03:30, `dedup` la domenica alle 05:00,
+ora italiana: `timeZone: Europe/Rome`, altrimenti il controller li legge in UTC)
 con `concurrencyPolicy: Forbid`: su un nodo da 7 GB un OOM a livello di nodo porta giù il
 cluster intero, non un solo pod.
 

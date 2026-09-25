@@ -25,6 +25,9 @@ metadata:
 spec:
   suspend: false
   schedule: "7,22,37,52 * * * *"
+  # Senza, il controller legge gli orari in UTC: "0 2" partiva alle 3 o alle
+  # 4 italiane, e tutti gli orari nei commenti erano sbagliati di 1-2 ore.
+  timeZone: "Europe/Rome"
   concurrencyPolicy: Forbid
   # Senza, un controller rimasto fermo che accumula oltre 100 orari mancati
   # smette di schedulare questo CronJob per sempre.
@@ -118,6 +121,9 @@ metadata:
 spec:
   suspend: false
   schedule: "0 2 * * *"
+  # Senza, il controller legge gli orari in UTC: "0 2" partiva alle 3 o alle
+  # 4 italiane, e tutti gli orari nei commenti erano sbagliati di 1-2 ore.
+  timeZone: "Europe/Rome"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 3600
   # Nessun activeDeadlineSeconds, per scelta: thumbs con un arretrato gira
