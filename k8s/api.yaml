@@ -46,6 +46,16 @@ spec:
                 secretKeyRef:
                   name: photovault-secrets
                   key: TOKEN
+            # Firma il cookie di sessione. Senza, l'API non parte.
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: photovault-secrets
+                  key: SESSION_SECRET
+            # 90 giorni: il cookie si rinnova quando si usa l'app, al massimo
+            # una volta al giorno.
+            - name: SESSION_TIMEOUTSECS
+              value: "7776000"
             - name: PGHOST
               value: "postgres.photovault.svc.cluster.local"
             - name: PGPORT

@@ -23,7 +23,7 @@ k8s/
 │   └── ingress.yaml      # Ingress — ${PHOTOVAULT_HOST}
 └── secrets/              # SOPS+age, applicati con ./decrypt.sh + kubectl
     ├── kustomization.yaml
-    ├── secrets.yaml      # TOKEN
+    ├── secrets.yaml      # TOKEN, SESSION_SECRET
     └── secrets-pg.yaml   # PGDATABASE / PGUSER / PGPASSWORD
 ```
 
@@ -71,7 +71,7 @@ cp .env.dist .env
 # 3. i secret, dai modelli
 cd k8s/secrets
 for f in secrets secrets-pg; do cp $f.yaml.dist $f.yaml; done
-# ... valorizzarli (TOKEN: openssl rand -hex 32) ...
+# ... valorizzarli (TOKEN e SESSION_SECRET: openssl rand -hex 32) ...
 cd ../..
 ./encrypt.sh
 
@@ -89,7 +89,10 @@ kubectl apply -k k8s
 kubectl -n photovault port-forward deployment/postgres 5432:5432
 cd ../photovault-db && node app.js -e local up
 
-# 8. ArgoCD, una volta sola
+# 8. il primo utente: senza, nessuno puo' entrare (chiede la password)
+kubectl -n photovault exec -it deploy/api -- node app.js user add <nome>
+
+# 9. ArgoCD, una volta sola
 kubectl apply -f k8s/argocd.yaml
 ```
 
@@ -111,7 +114,7 @@ Tre meccanismi, e un `pre-commit` che li fa rispettare.
 | Dato | Dove vive | Come arriva sul cluster |
 |---|---|---|
 | share, hostname | `.env` (gitignorato) | `envsubst` in `apply-manual.sh` |
-| TOKEN, credenziali PG | `k8s/secrets/*.yaml` cifrati | SOPS + age |
+| TOKEN, SESSION_SECRET, credenziali PG | `k8s/secrets/*.yaml` cifrati | SOPS + age |
 | chiave privata age | `private/` (gitignorata) | non ci arriva: serve solo a decifrare |
 
 L'hook `pre-commit` fa **tre** controlli, perché nessuno dei tre copre gli altri:
@@ -312,6 +315,12 @@ kubectl -n photovault logs -f deployment/api
 # scansione a comando, senza aspettare le 02:00
 kubectl -n photovault create job --from=cronjob/photovault-scan-nightly scan-manual
 kubectl -n photovault logs -f job/scan-manual
+
+# utenti: si gestiscono solo da qui, non esiste una pagina web
+kubectl -n photovault exec -it deploy/api -- node app.js user list
+kubectl -n photovault exec -it deploy/api -- node app.js user add <nome>
+kubectl -n photovault exec -it deploy/api -- node app.js user passwd <nome>
+kubectl -n photovault exec -it deploy/api -- node app.js user del <nome>
 
 # verifica dei manifest prima di committare
 kubectl kustomize k8s | kubectl apply --dry-run=server -f -
